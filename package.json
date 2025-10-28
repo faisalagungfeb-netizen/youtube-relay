@@ -1,0 +1,15 @@
+{
+  "name": "youtube-relay-server",
+  "version": "1.0.0",
+  "description": "Relay server untuk YouTube chat overlay",
+  "type": "module",
+  "main": "relay.js",
+  "scripts": {
+    "start": "node relay.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "ws": "^8.18.0",
+    "node-fetch": "^3.3.2"
+  }
+}
