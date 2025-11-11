@@ -1,0 +1,456 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>YouTube Chat Overlay</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      background: transparent;
+      overflow: hidden;
+      color: white;
+    }
+
+    #chat-container {
+      position: fixed;
+      bottom: 20px;
+      left: 20px;
+      width: 400px;
+      max-height: 600px;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      padding: 10px;
+    }
+
+    .chat-message {
+      background: rgba(0, 0, 0, 0.7);
+      padding: 12px 16px;
+      border-radius: 8px;
+      backdrop-filter: blur(10px);
+      animation: slideIn 0.3s ease-out;
+      word-wrap: break-word;
+    }
+
+    @keyframes slideIn {
+      from {
+        opacity: 0;
+        transform: translateX(-20px);
+      }
+      to {
+        opacity: 1;
+        transform: translateX(0);
+      }
+    }
+
+    .chat-author {
+      font-weight: bold;
+      margin-bottom: 4px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .chat-text {
+      font-size: 14px;
+      line-height: 1.4;
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 4px;
+    }
+
+    .badge {
+      display: inline-block;
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-size: 10px;
+      text-transform: uppercase;
+      font-weight: bold;
+    }
+
+    .yt-owner {
+      background: #ff0000;
+      color: white;
+    }
+
+    .yt-moderator {
+      background: #5e84f1;
+      color: white;
+    }
+
+    .yt-subscriber {
+      background: #0f9d58;
+      color: white;
+    }
+
+    .yt-viewer {
+      background: #666;
+      color: white;
+    }
+
+    .emote {
+      display: inline-block;
+      font-size: 20px;
+      vertical-align: middle;
+      margin: 0 2px;
+      line-height: 1;
+    }
+
+    .status-indicator {
+      position: fixed;
+      top: 20px;
+      right: 20px;
+      padding: 8px 16px;
+      border-radius: 20px;
+      font-size: 12px;
+      font-weight: bold;
+      backdrop-filter: blur(10px);
+    }
+
+    .status-live {
+      background: rgba(255, 0, 0, 0.8);
+      color: white;
+    }
+
+    .status-offline {
+      background: rgba(128, 128, 128, 0.8);
+      color: white;
+    }
+
+    .status-connecting {
+      background: rgba(255, 165, 0, 0.8);
+      color: white;
+    }
+
+    /* Scrollbar styling */
+    #chat-container::-webkit-scrollbar {
+      width: 8px;
+    }
+
+    #chat-container::-webkit-scrollbar-track {
+      background: rgba(0, 0, 0, 0.3);
+      border-radius: 4px;
+    }
+
+    #chat-container::-webkit-scrollbar-thumb {
+      background: rgba(255, 255, 255, 0.3);
+      border-radius: 4px;
+    }
+
+    #chat-container::-webkit-scrollbar-thumb:hover {
+      background: rgba(255, 255, 255, 0.5);
+    }
+  </style>
+</head>
+<body>
+  <div id="status" class="status-indicator status-connecting">Connecting...</div>
+  <div id="chat-container"></div>
+
+  <script>
+    const STORAGE_KEY = 'youtube_chat_messages';
+    const MAX_MESSAGES = 50;
+    let ws = null;
+    let reconnectTimeout = null;
+    let isStreamLive = false;
+
+    // YouTube Emote mapping - menggunakan emoji Unicode yang lebih reliable
+    const EMOTE_MAP = {
+      ':hand-pink-waving:': '👋',
+      ':hand-pink-wave:': '👋',
+      ':hand-pink-wrap:': '👋',
+      ':red-heart:': '❤️',
+      ':heart:': '❤️',
+      ':fire:': '🔥',
+      ':thumbs-up:': '👍',
+      ':thumbsup:': '👍',
+      ':clapping-hands:': '👏',
+      ':clap:': '👏',
+      ':smiling-face-with-heart-eyes:': '😍',
+      ':heart-eyes:': '😍',
+      ':face-with-tears-of-joy:': '😂',
+      ':joy:': '😂',
+      ':party-popper:': '🎉',
+      ':tada:': '🎉',
+      ':sparkles:': '✨',
+      ':star-struck:': '🤩',
+      ':thinking-face:': '🤔',
+      ':thinking:': '🤔',
+      ':crying-face:': '😭',
+      ':sob:': '😭',
+      ':hundred-points:': '💯',
+      ':100:': '💯',
+      ':eyes:': '👀',
+      ':raised-hands:': '🙌',
+      ':pray:': '🙏',
+      ':muscle:': '💪',
+      ':ok-hand:': '👌',
+      ':victory-hand:': '✌️',
+      ':peace:': '✌️',
+      ':star:': '⭐',
+      ':rainbow:': '🌈',
+      ':sunglasses:': '😎',
+      ':cool:': '😎',
+      ':laughing:': '😆',
+      ':grin:': '😁',
+      ':smile:': '😊',
+      ':wink:': '😉',
+      ':kissing-heart:': '😘',
+      ':stuck-out-tongue:': '😛',
+      ':money-mouth:': '🤑',
+      ':nerd:': '🤓',
+      ':confused:': '😕',
+      ':worried:': '😟',
+      ':angry:': '😠',
+      ':rage:': '😡',
+      ':scream:': '😱',
+      ':flushed:': '😳',
+      ':sleeping:': '😴',
+      ':dizzy:': '😵',
+      ':zipper-mouth:': '🤐',
+      ':mask:': '😷',
+      ':robot:': '🤖',
+      ':alien:': '👽',
+      ':ghost:': '👻',
+      ':skull:': '💀',
+      ':poop:': '💩',
+      ':wave:': '👋',
+      ':raised-hand:': '✋',
+      ':point-up:': '☝️',
+      ':point-down:': '👇',
+      ':point-left:': '👈',
+      ':point-right:': '👉',
+    };
+
+    // Parse message and convert emotes to emoji
+    function parseEmotes(message) {
+      let parsed = message;
+      
+      // Replace emote codes with emoji
+      for (const [code, emoji] of Object.entries(EMOTE_MAP)) {
+        const regex = new RegExp(code.replace(/[.*+?^${}()|[\]\\]/g, '\\    // Parse message and convert emotes to images
+    function parseEmotes(message) {
+      let parsed = message;
+      
+      // Replace emote codes with img tags
+      for (const [code, url] of Object.entries(EMOTE_MAP)) {
+        const regex = new RegExp(code.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g');
+        parsed = parsed.replace(regex, `<img src="${url}" class="emote" alt="${code}" title="${code}">`);
+      }
+      
+      // Fallback: convert any remaining :text: to emoji if possible
+      parsed = parsed.replace(/:([a-z-]+):/g, (match, p1) => {
+        // If not in our map, try to keep it as text or use a generic emoji
+        return match;
+      });
+      
+      return parsed;
+    }'), 'g');
+        parsed = parsed.replace(regex, `<span class="emote" title="${code}">${emoji}</span>`);
+      }
+      
+      // Fallback: keep any remaining :text: as is (atau bisa dihapus jika mau)
+      // parsed = parsed.replace(/:([a-z-]+):/g, '');
+      
+      return parsed;
+    }
+
+    // Load messages from localStorage
+    function loadMessages() {
+      try {
+        const stored = localStorage.getItem(STORAGE_KEY);
+        if (stored) {
+          const messages = JSON.parse(stored);
+          messages.forEach(msg => displayMessage(msg, false));
+        }
+      } catch (err) {
+        console.error('Error loading messages:', err);
+      }
+    }
+
+    // Save messages to localStorage
+    function saveMessages() {
+      try {
+        const container = document.getElementById('chat-container');
+        const messages = Array.from(container.children).map(el => ({
+          author: el.dataset.author,
+          message: el.dataset.message,
+          role: el.dataset.role,
+          time: el.dataset.time
+        }));
+        
+        // Keep only last MAX_MESSAGES
+        const toSave = messages.slice(-MAX_MESSAGES);
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(toSave));
+      } catch (err) {
+        console.error('Error saving messages:', err);
+      }
+    }
+
+    // Clear localStorage
+    function clearMessages() {
+      try {
+        localStorage.removeItem(STORAGE_KEY);
+        document.getElementById('chat-container').innerHTML = '';
+        console.log('✅ Chat history cleared');
+      } catch (err) {
+        console.error('Error clearing messages:', err);
+      }
+    }
+
+    // Display a chat message
+    function displayMessage(data, shouldSave = true) {
+      const container = document.getElementById('chat-container');
+      const messageEl = document.createElement('div');
+      messageEl.className = 'chat-message';
+      
+      // Store data for saving
+      messageEl.dataset.author = data.author;
+      messageEl.dataset.message = data.message;
+      messageEl.dataset.role = data.role;
+      messageEl.dataset.time = data.time;
+
+      const authorEl = document.createElement('div');
+      authorEl.className = 'chat-author';
+      
+      const badgeEl = document.createElement('span');
+      badgeEl.className = `badge ${data.role}`;
+      badgeEl.textContent = data.role.replace('yt-', '');
+      
+      const nameEl = document.createElement('span');
+      nameEl.textContent = data.author;
+      
+      authorEl.appendChild(badgeEl);
+      authorEl.appendChild(nameEl);
+
+      const textEl = document.createElement('div');
+      textEl.className = 'chat-text';
+      textEl.innerHTML = parseEmotes(data.message);
+
+      messageEl.appendChild(authorEl);
+      messageEl.appendChild(textEl);
+      container.appendChild(messageEl);
+
+      // Auto scroll to bottom
+      container.scrollTop = container.scrollHeight;
+
+      // Remove old messages if too many
+      while (container.children.length > MAX_MESSAGES) {
+        container.removeChild(container.firstChild);
+      }
+
+      // Save to localStorage
+      if (shouldSave) {
+        saveMessages();
+      }
+    }
+
+    // Update status indicator
+    function updateStatus(status) {
+      const statusEl = document.getElementById('status');
+      statusEl.className = 'status-indicator';
+      
+      switch(status) {
+        case 'live':
+          statusEl.classList.add('status-live');
+          statusEl.textContent = '🔴 LIVE';
+          isStreamLive = true;
+          break;
+        case 'offline':
+          statusEl.classList.add('status-offline');
+          statusEl.textContent = '⚫ OFFLINE';
+          isStreamLive = false;
+          break;
+        case 'connecting':
+          statusEl.classList.add('status-connecting');
+          statusEl.textContent = '🟡 Connecting...';
+          break;
+      }
+    }
+
+    // Connect to WebSocket
+    function connect() {
+      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const wsUrl = `${protocol}//${window.location.host}`;
+      
+      console.log('Connecting to:', wsUrl);
+      updateStatus('connecting');
+      
+      ws = new WebSocket(wsUrl);
+
+      ws.onopen = () => {
+        console.log('✅ Connected to relay server');
+        updateStatus('live');
+        if (reconnectTimeout) {
+          clearTimeout(reconnectTimeout);
+          reconnectTimeout = null;
+        }
+      };
+
+      ws.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          
+          if (data.type === 'chat') {
+            displayMessage(data);
+          } else if (data.type === 'stream_started') {
+            console.log('📡 Stream started');
+            updateStatus('live');
+            isStreamLive = true;
+          } else if (data.type === 'stream_ended') {
+            console.log('📡 Stream ended - clearing chat history');
+            updateStatus('offline');
+            isStreamLive = false;
+            // Clear localStorage when stream ends
+            clearMessages();
+          }
+        } catch (err) {
+          console.error('Error parsing message:', err);
+        }
+      };
+
+      ws.onerror = (error) => {
+        console.error('WebSocket error:', error);
+      };
+
+      ws.onclose = () => {
+        console.log('❌ Disconnected from relay server');
+        updateStatus('offline');
+        
+        // Auto reconnect after 5 seconds
+        reconnectTimeout = setTimeout(() => {
+          console.log('🔄 Reconnecting...');
+          connect();
+        }, 5000);
+      };
+    }
+
+    // Initialize
+    window.addEventListener('DOMContentLoaded', () => {
+      console.log('🎬 YouTube Chat Overlay initialized');
+      
+      // Load saved messages
+      loadMessages();
+      
+      // Connect to WebSocket
+      connect();
+    });
+
+    // Clear localStorage when page is closed (optional)
+    window.addEventListener('beforeunload', () => {
+      // Only clear if stream is not live
+      if (!isStreamLive) {
+        clearMessages();
+      }
+    });
+  </script>
+</body>
+</html>
